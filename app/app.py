@@ -1,39 +1,14 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
+import joblib
 import plotly.express as px
+import requests
+import os
 
-# Function to generate dummy data
-def generate_dummy_data():
-    # Cohort data
-    patient_ids = [f'PAT-{100+i}' for i in range(20)]
-    data = {
-        'Patient ID': patient_ids,
-        'Risk Score': np.random.randint(5, 96, size=20),
-        'Risk Trend': np.random.choice(['↑', '↓', '→'], size=20, p=[0.4, 0.4, 0.2]),
-        'Top Risk Driver': np.random.choice([
-            'BP Volatility', 'Medication Adherence', 'High Glucose Readings', 
-            'Weight Gain', 'Low Activity Level'
-        ], size=20)
-    }
-    cohort_df = pd.DataFrame(data)
-
-    # Individual patient detail data (time series and explanations)
-    patient_details = {}
-    for pid in patient_ids:
-        # Time series data for charts
-        dates = pd.to_datetime(pd.date_range(end='2025-08-29', periods=90, freq='D'))
-        bp_systolic = np.random.randint(110, 180, size=90)
-        patient_details[pid] = {
-            'time_series': pd.DataFrame({'Date': dates, 'Systolic BP': bp_systolic}),
-            'explanations': {
-                'increasing_risk': ['High BP Volatility (Std. Dev > 15mmHg)', 'Medication adherence at 65%'],
-                'decreasing_risk': ['Consistent daily activity (avg. 6k steps)', 'Stable weight over last 30 days']
-            },
-            'recommendations': 'Schedule telehealth check-in to discuss blood pressure management.'
-        }
-    
-    return cohort_df, patient_details
+# Import your custom processing functions from the src folder
+# Vercel needs to know the path starts from the root
+from src.data_processing import load_and_clean_data
+from src.feature_engineering import create_features
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -42,12 +17,57 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Data Loading ---
-cohort_df, patient_details = generate_dummy_data()
+# --- Model & Data Loading ---
+# This decorator caches the model, so it's only downloaded ONCE when the app starts.
+@st.cache_resource
+def load_model_from_url():
+    # 👈 This is the line you were looking for. Paste your URL here.
+    model_url = "https://media.githubusercontent.com/media/shaina-gh/risk-prediction-engine/main/models/risk_model.joblib" 
+    
+    # The model will be saved to a temporary path in the Vercel environment
+    model_path = "/tmp/risk_model.joblib"
+    
+    # Download the file if it doesn't exist
+    if not os.path.exists(model_path):
+        with st.spinner("Downloading model... this may take a moment."):
+            r = requests.get(model_url, allow_redirects=True)
+            with open(model_path, 'wb') as f:
+                f.write(r.content)
+    
+    # Load the model from the temporary path
+    model = joblib.load(model_path)
+    return model
+
+@st.cache_data
+def process_data(_model): # Pass the model into the function
+    # Load and process the patient data using your pipeline
+    raw_df = load_and_clean_data('data/raw/patient_vitals.csv')
+    features_df = create_features(raw_df)
+    
+    # Ensure features are in the same order as during training
+    X = features_df.drop(columns=['Patient ID'])
+    
+    # Make predictions
+    risk_scores = _model.predict_proba(X)[:, 1]
+    
+    # Create the cohort dataframe for the dashboard
+    cohort_df = features_df[['Patient ID']].copy()
+    cohort_df['Risk Score'] = (risk_scores * 100).astype(int)
+    
+    # Dummy data for trend and drivers
+    cohort_df['Risk Trend'] = '→'
+    cohort_df['Top Risk Driver'] = 'BP Volatility'
+    
+    return cohort_df, features_df
+
+# Main app execution
+model = load_model_from_url()
+cohort_df, features_df = process_data(model)
+
 
 # --- UI: Title & Filters ---
 st.title("🩺 AI-Driven Risk Prediction Engine")
-st.markdown("Dashboard for monitoring chronic care patients at risk of deterioration.")
+st.markdown("This dashboard is powered by a model trained on patient vital signs.")
 
 st.sidebar.header("Filters")
 risk_threshold = st.sidebar.slider(
@@ -57,21 +77,14 @@ risk_threshold = st.sidebar.slider(
 
 # --- UI: Cohort View Table ---
 st.header("Patient Cohort View")
-
-# Filter the dataframe based on the slider
 filtered_df = cohort_df[cohort_df['Risk Score'] >= risk_threshold]
 
-# Function to color the risk scores
 def style_risk_score(score):
-    if score > 70:
-        color = 'red'
-    elif score > 40:
-        color = 'orange'
-    else:
-        color = 'green'
+    if score > 70: color = 'red'
+    elif score > 40: color = 'orange'
+    else: color = 'green'
     return f'background-color: {color}; color: white'
 
-# Display the styled dataframe
 st.dataframe(
     filtered_df.style.applymap(style_risk_score, subset=['Risk Score']),
     use_container_width=True
@@ -80,50 +93,29 @@ st.dataframe(
 # --- UI: Patient Detail View ---
 st.header("Patient Detail View")
 
-# Dropdown to select a patient from the filtered list
-selected_patient_id = st.selectbox(
-    'Select a Patient to View Details:',
-    options=filtered_df['Patient ID'].unique()
-)
+if not filtered_df.empty:
+    selected_patient_id = st.selectbox(
+        'Select a Patient to View Details:',
+        options=filtered_df['Patient ID'].unique()
+    )
 
-if selected_patient_id:
-    # Get the details for the selected patient
-    details = patient_details[selected_patient_id]
-    patient_cohort_info = cohort_df[cohort_df['Patient ID'] == selected_patient_id].iloc[0]
+    if selected_patient_id:
+        patient_cohort_info = filtered_df[filtered_df['Patient ID'] == selected_patient_id].iloc[0]
+        patient_feature_info = features_df[features_df['Patient ID'] == selected_patient_id].iloc[0]
 
-    # Display key metrics
-    col1, col2 = st.columns(2)
-    with col1:
         st.metric(
             label="Current Risk Score",
-            value=f"{patient_cohort_info['Risk Score']}%",
-            delta=f"Trend: {patient_cohort_info['Risk Trend']}"
+            value=f"{patient_cohort_info['Risk Score']}%"
         )
-    
-    # Display the explainability and recommendations
-    st.subheader("Key Risk Drivers & Recommendations")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("#### 🔴 Factors Increasing Risk")
-        for factor in details['explanations']['increasing_risk']:
-            st.markdown(f"- {factor}")
         
-        st.markdown("#### 🟢 Factors Decreasing Risk")
-        for factor in details['explanations']['decreasing_risk']:
-            st.markdown(f"- {factor}")
+        st.subheader(f"Feature Values for {selected_patient_id}")
+        st.write(patient_feature_info) # Display all feature values for the selected patient
+        
+        # TODO: Replace the dummy text below with real SHAP explanations
+        st.subheader("Key Risk Drivers")
+        st.warning("**Note:** The explanations below are placeholders. A real implementation would use SHAP values calculated for this specific patient.")
+        st.markdown("- **High `std_sbp` (Blood Pressure Volatility):** This is the primary factor increasing risk according to the model's logic.")
+        st.markdown("- **High `max_hr` (Maximum Heart Rate):** Elevated peak heart rates are contributing to the risk score.")
 
-    with col2:
-        st.warning(f"**Recommended Next Action:**\n{details['recommendations']}")
-
-    # Display the trend chart
-    st.subheader("Blood Pressure Trend (Last 90 Days)")
-    time_series_df = details['time_series']
-    fig = px.line(
-        time_series_df, 
-        x='Date', 
-        y='Systolic BP', 
-        title='Systolic Blood Pressure Trend',
-        labels={'Systolic BP': 'Systolic BP (mmHg)'}
-    )
-    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.warning("No patients match the current filter settings.")
