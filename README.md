@@ -58,7 +58,7 @@ For example:
 # 🛠 Setup and Local Usage
 To run this project on your own machine, follow these steps.
 
-- Clone the repository:
+Clone the repository:
 git clone [https://github.com/shaina-gh/risk-prediction-engine.git](https://github.com/shaina-gh/risk-prediction-engine.git)
 
 cd risk-prediction-engine
