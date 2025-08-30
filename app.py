@@ -9,16 +9,15 @@ from src.feature_engineering import create_features
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Chronic Care Risk Engine",
+    page_title="AI-Driven Risk Prediction Engine",
     page_icon="🩺",
     layout="wide"
 )
 
 # --- Model & Data Loading ---
-# This decorator caches the resources so they are loaded only once
 @st.cache_resource
 def load_model():
-    # Load the model directly from the file path
+    # Load the model directly from the file path, which works with Git LFS
     model = joblib.load('models/risk_model.joblib')
     return model
 
@@ -39,59 +38,63 @@ def process_data(_model):
     return cohort_df, features_df
 
 # Main app execution
-model = load_model()
-cohort_df, features_df = process_data(model)
+try:
+    model = load_model()
+    cohort_df, features_df = process_data(model)
 
+    # --- UI: Title & Filters ---
+    st.title("🩺 AI-Driven Risk Prediction Engine")
+    st.markdown("This dashboard is powered by a model trained on patient vital signs.")
 
-# --- UI: Title & Filters ---
-st.title("🩺 AI-Driven Risk Prediction Engine")
-st.markdown("This dashboard is powered by a model trained on patient vital signs.")
-
-st.sidebar.header("Filters")
-risk_threshold = st.sidebar.slider(
-    'Show patients with risk score above:',
-    min_value=0, max_value=100, value=50, step=5
-)
-
-# --- UI: Cohort View Table ---
-st.header("Patient Cohort View")
-filtered_df = cohort_df[cohort_df['Risk Score'] >= risk_threshold]
-
-def style_risk_score(score):
-    if score > 70: color = 'red'
-    elif score > 40: color = 'orange'
-    else: color = 'green'
-    return f'background-color: {color}; color: white'
-
-st.dataframe(
-    filtered_df.style.applymap(style_risk_score, subset=['Risk Score']),
-    use_container_width=True
-)
-
-# --- UI: Patient Detail View ---
-st.header("Patient Detail View")
-
-if not filtered_df.empty:
-    selected_patient_id = st.selectbox(
-        'Select a Patient to View Details:',
-        options=filtered_df['Patient ID'].unique()
+    st.sidebar.header("Filters")
+    risk_threshold = st.sidebar.slider(
+        'Show patients with risk score above:',
+        min_value=0, max_value=100, value=50, step=5
     )
 
-    if selected_patient_id:
-        patient_cohort_info = filtered_df[filtered_df['Patient ID'] == selected_patient_id].iloc[0]
-        patient_feature_info = features_df[features_df['Patient ID'] == selected_patient_id].iloc[0]
+    # --- UI: Cohort View Table ---
+    st.header("Patient Cohort View")
+    filtered_df = cohort_df[cohort_df['Risk Score'] >= risk_threshold]
 
-        st.metric(
-            label="Current Risk Score",
-            value=f"{patient_cohort_info['Risk Score']}%"
+    def style_risk_score(score):
+        if score > 70: color = 'red'
+        elif score > 40: color = 'orange'
+        else: color = 'green'
+        return f'background-color: {color}; color: white'
+
+    st.dataframe(
+        filtered_df.style.map(style_risk_score, subset=['Risk Score']),
+        use_container_width=True
+    )
+
+    # --- UI: Patient Detail View ---
+    st.header("Patient Detail View")
+
+    if not filtered_df.empty:
+        selected_patient_id = st.selectbox(
+            'Select a Patient to View Details:',
+            options=filtered_df['Patient ID'].unique()
         )
-        
-        st.subheader(f"Feature Values for {selected_patient_id}")
-        st.write(patient_feature_info)
-        
-        st.subheader("Key Risk Drivers")
-        st.markdown("- **High `std_sbp` (Blood Pressure Volatility):** This is the primary factor increasing risk according to the model's logic.")
-        st.markdown("- **High `max_hr` (Maximum Heart Rate):** Elevated peak heart rates are contributing to the risk score.")
 
-else:
-    st.warning("No patients match the current filter settings.")
+        if selected_patient_id:
+            patient_cohort_info = filtered_df[filtered_df['Patient ID'] == selected_patient_id].iloc[0]
+            patient_feature_info = features_df[features_df['Patient ID'] == selected_patient_id].iloc[0]
+
+            st.metric(
+                label="Current Risk Score",
+                value=f"{patient_cohort_info['Risk Score']}%"
+            )
+            
+            st.subheader(f"Feature Values for {selected_patient_id}")
+            st.write(patient_feature_info)
+            
+            st.subheader("Key Risk Drivers")
+            st.markdown("- **High `std_sbp` (Blood Pressure Volatility):** This is the primary factor increasing risk according to the model's logic.")
+            st.markdown("- **High `max_hr` (Maximum Heart Rate):** Elevated peak heart rates are contributing to the risk score.")
+
+    else:
+        st.warning("No patients match the current filter settings.")
+
+except Exception as e:
+    st.error(f"An error occurred: {e}")
+    st.info("The app failed to load the model or process data. Please check the logs.")
