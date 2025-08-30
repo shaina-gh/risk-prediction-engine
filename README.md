@@ -60,6 +60,7 @@ To run this project on your own machine, follow these steps.
 
 - Clone the repository:
 git clone [https://github.com/shaina-gh/risk-prediction-engine.git](https://github.com/shaina-gh/risk-prediction-engine.git)
+
 cd risk-prediction-engine
 
 ## Install system dependencies (for Git LFS):
