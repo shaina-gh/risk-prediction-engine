@@ -9,5 +9,3 @@ env/
 
 # Distribution / build artifacts
 .DS_Store
-
-models/*.joblib
