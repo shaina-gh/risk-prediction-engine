@@ -19,24 +19,34 @@ st.set_page_config(
 
 # --- Model & Data Loading ---
 # This decorator caches the model, so it's only downloaded ONCE when the app starts.
+# This is the new, more robust function
 @st.cache_resource
 def load_model_from_url():
-    # 👈 This is the line you were looking for. Paste your URL here.
-    model_url = "https://media.githubusercontent.com/media/shaina-gh/risk-prediction-engine/main/models/risk_model.joblib" 
-    
-    # The model will be saved to a temporary path in the Vercel environment
+    model_url = "https://media.githubusercontent.com/media/shaina-gh/risk-prediction-engine/main/models/risk_model.joblib"
     model_path = "/tmp/risk_model.joblib"
     
-    # Download the file if it doesn't exist
+    # Download the file only if it doesn't already exist in the temporary folder
     if not os.path.exists(model_path):
         with st.spinner("Downloading model... this may take a moment."):
-            r = requests.get(model_url, allow_redirects=True)
-            with open(model_path, 'wb') as f:
-                f.write(r.content)
+            try:
+                response = requests.get(model_url, allow_redirects=True)
+                # Raise an exception if the download fails (e.g., 404 error)
+                response.raise_for_status()
+                
+                with open(model_path, 'wb') as f:
+                    f.write(response.content)
+            except requests.exceptions.RequestException as e:
+                st.error(f"Error downloading model: {e}")
+                # Stop the app if the model can't be downloaded
+                st.stop()
     
     # Load the model from the temporary path
-    model = joblib.load(model_path)
-    return model
+    try:
+        model = joblib.load(model_path)
+        return model
+    except Exception as e:
+        st.error(f"Error loading model: {e}")
+        st.stop()
 
 @st.cache_data
 def process_data(_model): # Pass the model into the function
